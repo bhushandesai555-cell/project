@@ -1,0 +1,113 @@
+---
+- name: Configure Web Servers
+  hosts: tag_Project_production-app
+  become: yes
+  vars:
+    app_user: "webapp"
+    app_dir: "/var/www/html"
+    
+  tasks:
+    - name: Update system packages
+      yum:
+        name: "*"
+        state: latest
+      become: yes
+
+    - name: Install required packages
+      yum:
+        name:
+          - nginx
+          - php
+          - php-fpm
+          - php-mysqlnd
+          - git
+        state: present
+      become: yes
+
+    - name: Create application user
+      user:
+        name: "{{ app_user }}"
+        system: yes
+        create_home: yes
+      become: yes
+
+    - name: Configure nginx
+      template:
+        src: templates/nginx.conf.j2
+        dest: /etc/nginx/nginx.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart nginx
+      become: yes
+
+    - name: Configure PHP-FPM
+      template:
+        src: templates/www.conf.j2
+        dest: /etc/php-fpm.d/www.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart php-fpm
+      become: yes
+
+    - name: Create application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+      become: yes
+
+    - name: Deploy application code
+      copy:
+        src: ../app_files/
+        dest: "{{ app_dir }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0644'
+      become: yes
+
+    - name: Configure application
+      template:
+        src: templates/config.php.j2
+        dest: "{{ app_dir }}/config.php"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0644'
+      become: yes
+
+    - name: Set SELinux permissions
+      sefcontext:
+        target: "{{ app_dir }}(/.*)?"
+        setype: httpd_sys_content_t
+        state: present
+      become: yes
+
+    - name: Relabel SELinux context
+      command: restorecon -R -v "{{ app_dir }}"
+      become: yes
+
+    - name: Start and enable services
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - nginx
+        - php-fpm
+      become: yes
+
+  handlers:
+    - name: restart nginx
+      systemd:
+        name: nginx
+        state: restarted
+      become: yes
+
+    - name: restart php-fpm
+      systemd:
+        name: php-fpm
+        state: restarted
+      become: yes
